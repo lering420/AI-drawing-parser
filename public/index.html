@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 工程图纸解析</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="app">
+  <!-- 侧边导航 -->
+  <aside class="sidebar">
+    <div class="logo">
+      <div class="logo-icon">图</div>
+      <div>
+        <div class="logo-name">图纸智能解析</div>
+        <div class="logo-sub">AI Drawing Inspector</div>
+      </div>
+    </div>
+    <nav id="nav">
+      <button class="nav-item active" data-page="extract">
+        <span class="nav-ico">📄</span><span>提取特征参数</span>
+      </button>
+      <button class="nav-item" data-page="audit">
+        <span class="nav-ico">🔍</span><span>勘误检查</span>
+      </button>
+      <button class="nav-item" data-page="manage">
+        <span class="nav-ico">🗄️</span><span>入库与数据管理</span>
+      </button>
+      <button class="nav-item" data-page="query">
+        <span class="nav-ico">💬</span><span>智能查询</span>
+      </button>
+    </nav>
+    <div class="sidebar-foot">
+      <button class="nav-item" id="btn-settings">
+        <span class="nav-ico">⚙️</span><span>设置</span>
+      </button>
+      <div class="key-state" id="key-state">检测密钥中…</div>
+    </div>
+  </aside>
+
+  <!-- 主区域 -->
+  <main class="main">
+
+    <!-- ========== 模块1：提取特征参数 ========== -->
+    <section class="page active" id="page-extract">
+      <header class="page-head">
+        <h1>提取特征参数</h1>
+        <p>上传零件图/装配图 PDF → AI 识别标题栏、尺寸公差、粗糙度、技术要求 → 核对后确认入库</p>
+      </header>
+
+      <div class="extract-grid">
+        <!-- 左：上传与页面 -->
+        <div class="card">
+          <h2>1. 图纸文件</h2>
+          <div class="dropzone" id="dropzone">
+            <div class="dz-inner">
+              <div class="dz-ico">⬆️</div>
+              <div class="dz-text">点击或拖入 PDF 图纸</div>
+              <div class="dz-hint">支持多页，单次最多识别 12 页</div>
+            </div>
+            <input type="file" id="file-input" accept="application/pdf" hidden>
+          </div>
+          <div class="file-meta" id="file-meta" hidden>
+            <div class="fm-row"><span>文件：</span><b id="fm-name"></b></div>
+            <div class="fm-row"><span>页数：</span><b id="fm-pages"></b></div>
+            <div class="fm-row"><span>状态：</span><b id="fm-status">未提取</b></div>
+          </div>
+          <div class="thumbs" id="thumbs"></div>
+          <div class="btn-row">
+            <button class="btn primary" id="btn-extract" disabled>🤖 开始 AI 提取</button>
+            <button class="btn ghost" id="btn-reset" hidden>重新上传</button>
+          </div>
+          <div class="progress" id="extract-progress" hidden>
+            <div class="spinner"></div><span id="extract-progress-text">AI 正在读图…</span>
+          </div>
+        </div>
+
+        <!-- 右：提取结果编辑 -->
+        <div class="card" id="result-card">
+          <h2>2. 提取结果（可修改后入库）</h2>
+          <div class="empty-hint" id="result-empty">还没有提取结果。先在左侧上传 PDF，点击「开始 AI 提取」。</div>
+
+          <div id="result-editor" hidden>
+            <div class="form-grid" id="title-fields"></div>
+
+            <div class="res-block" id="block-dimensions">
+              <h3>尺寸与公差 <button class="mini-btn" data-add="dimensions">+ 添加</button></h3>
+              <table class="edit-table"><thead><tr>
+                <th>特征</th><th>尺寸值</th><th>公差/偏差</th><th></th>
+              </tr></thead><tbody id="tb-dimensions"></tbody></table>
+            </div>
+
+            <div class="res-block" id="block-fits">
+              <h3>配合要求 <button class="mini-btn" data-add="fits">+ 添加</button></h3>
+              <table class="edit-table"><thead><tr>
+                <th>特征</th><th>配合代号</th><th>公差</th><th></th>
+              </tr></thead><tbody id="tb-fits"></tbody></table>
+            </div>
+
+            <div class="res-block">
+              <h3>表面粗糙度 <button class="mini-btn" data-add="roughness">+ 添加</button></h3>
+              <div class="chips" id="chips-roughness"></div>
+            </div>
+
+            <div class="res-block" id="block-geo">
+              <h3>形位公差 <button class="mini-btn" data-add="geometric_tolerances">+ 添加</button></h3>
+              <table class="edit-table"><thead><tr>
+                <th>被测要素</th><th>符号</th><th>公差值</th><th>基准</th><th></th>
+              </tr></thead><tbody id="tb-geo"></tbody></table>
+            </div>
+
+            <div class="form-grid" id="extra-fields"></div>
+
+            <div class="res-block">
+              <h3>技术要求 <button class="mini-btn" data-add="technical_requirements">+ 添加</button></h3>
+              <div class="list-edit" id="list-tech"></div>
+            </div>
+
+            <div class="res-block" id="block-bom">
+              <h3>零件明细表（BOM）<button class="mini-btn" data-add="bom">+ 添加</button></h3>
+              <table class="edit-table"><thead><tr>
+                <th>序号</th><th>名称</th><th>材料</th><th>数量</th><th></th>
+              </tr></thead><tbody id="tb-bom"></tbody></table>
+            </div>
+
+            <div class="res-block">
+              <h3>备注</h3>
+              <textarea id="in-notes" rows="2"></textarea>
+            </div>
+
+            <div class="btn-row">
+              <button class="btn primary" id="btn-save">✅ 确认入库</button>
+              <button class="btn ghost" id="btn-reextract">🔄 重新提取</button>
+              <span class="save-ok" id="save-ok" hidden>已入库！可到「入库与数据管理」查看</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 模块2：勘误检查 ========== -->
+    <section class="page" id="page-audit">
+      <header class="page-head">
+        <h1>勘误检查</h1>
+        <p>按机械制图规范检查图纸：尺寸、公差、粗糙度、形位公差、材料、标题栏、图面一致性…</p>
+      </header>
+
+      <div class="card">
+        <div class="audit-bar">
+          <label>选择图纸：
+            <select id="audit-select"><option value="">— 请选择已上传的图纸 —</option></select>
+          </label>
+          <div class="rules" id="rules">
+            <span class="rules-label">检查项：</span>
+            <label class="rule"><input type="checkbox" value="尺寸标注" checked>尺寸标注</label>
+            <label class="rule"><input type="checkbox" value="公差配合" checked>公差配合</label>
+            <label class="rule"><input type="checkbox" value="表面粗糙度" checked>表面粗糙度</label>
+            <label class="rule"><input type="checkbox" value="形位公差" checked>形位公差</label>
+            <label class="rule"><input type="checkbox" value="材料与热处理" checked>材料与热处理</label>
+            <label class="rule"><input type="checkbox" value="技术要求" checked>技术要求</label>
+            <label class="rule"><input type="checkbox" value="标题栏完整性" checked>标题栏</label>
+            <label class="rule"><input type="checkbox" value="图面一致性" checked>图面一致性</label>
+            <label class="rule"><input type="checkbox" value="投影与剖视">投影剖视</label>
+            <label class="rule"><input type="checkbox" value="明细表">明细表</label>
+          </div>
+          <button class="btn primary" id="btn-audit">🔍 开始勘误</button>
+        </div>
+        <div class="progress" id="audit-progress" hidden>
+          <div class="spinner"></div><span>AI 正在逐项检查图纸…</span>
+        </div>
+      </div>
+
+      <div id="audit-result" hidden>
+        <div class="sev-summary" id="sev-summary"></div>
+        <div class="issue-board">
+          <div class="issue-col" data-sev="severe">
+            <h3 class="sev-title severe">⚠️ 严重问题</h3>
+            <div class="issue-list" id="issues-severe"></div>
+          </div>
+          <div class="issue-col" data-sev="general">
+            <h3 class="sev-title general">🔸 一般问题</h3>
+            <div class="issue-list" id="issues-general"></div>
+          </div>
+          <div class="issue-col" data-sev="hint">
+            <h3 class="sev-title hint">💡 提示</h3>
+            <div class="issue-list" id="issues-hint"></div>
+          </div>
+        </div>
+      </div>
+      <div class="empty-hint" id="audit-empty">选择一张图纸开始勘误。检查完成后，问题会按严重程度分三栏显示，每条可「采纳」或「忽略」。</div>
+    </section>
+
+    <!-- ========== 模块3：入库与数据管理 ========== -->
+    <section class="page" id="page-manage">
+      <header class="page-head">
+        <h1>入库与数据管理</h1>
+        <p>图纸台账：查看、编辑、归档、删除已入库的图纸与参数，原图 PDF 一并归档可回看</p>
+      </header>
+
+      <div class="card">
+        <div class="manage-bar">
+          <div class="tabs" id="status-tabs">
+            <button class="tab active" data-status="confirmed">在库</button>
+            <button class="tab" data-status="draft">草稿</button>
+            <button class="tab" data-status="archived">归档</button>
+          </div>
+          <input type="search" id="manage-search" placeholder="搜图号 / 名称 / 材料…">
+          <div class="btn-row">
+            <button class="btn ghost" id="btn-export-all">⬇ 导出台账 CSV</button>
+          </div>
+        </div>
+        <table class="list-table">
+          <thead><tr>
+            <th>图号</th><th>名称</th><th>材料</th><th>类别</th><th>版本</th>
+            <th>日期</th><th>勘误</th><th>状态</th><th>更新时间</th><th>操作</th>
+          </tr></thead>
+          <tbody id="drawing-rows"></tbody>
+        </table>
+        <div class="empty-hint" id="manage-empty" hidden>这里还没有图纸。</div>
+      </div>
+    </section>
+
+    <!-- ========== 模块4：智能查询 ========== -->
+    <section class="page" id="page-query">
+      <header class="page-head">
+        <h1>智能查询</h1>
+        <p>用大白话查图纸库：条件、参数、状态都能问，AI 给答案并列出命中的图纸</p>
+      </header>
+
+      <div class="card query-card">
+        <div class="query-examples">
+          <span>试试：</span>
+          <button class="chip-btn">查所有用 45 钢的图纸</button>
+          <button class="chip-btn">哪些图纸还有未处理的严重问题？</button>
+          <button class="chip-btn">最近一周入库了哪些图？</button>
+          <button class="chip-btn">库里有哪些轴类零件？</button>
+        </div>
+        <div class="query-input-row">
+          <input type="text" id="query-input" placeholder="输入你的问题…">
+          <button class="btn primary" id="btn-query">查询</button>
+        </div>
+        <div class="progress" id="query-progress" hidden>
+          <div class="spinner"></div><span>AI 正在检索图纸库…</span>
+        </div>
+        <div id="query-answer" class="answer" hidden></div>
+        <div id="query-hits" class="hit-grid"></div>
+      </div>
+
+      <div class="card">
+        <h2>条件筛选</h2>
+        <div class="filter-row">
+          <label>材料 <select id="f-material"><option value="">全部</option></select></label>
+          <label>类别 <select id="f-category"><option value="">全部</option><option>零件图</option><option>装配图</option></select></label>
+          <label>状态 <select id="f-status"><option value="">全部</option><option value="confirmed">在库</option><option value="archived">归档</option></select></label>
+          <button class="btn ghost" id="btn-filter">筛选</button>
+          <button class="btn ghost" id="btn-export-filter">⬇ 导出结果 CSV</button>
+        </div>
+        <table class="list-table">
+          <thead><tr><th>图号</th><th>名称</th><th>材料</th><th>类别</th><th>日期</th></tr></thead>
+          <tbody id="filter-rows"></tbody>
+        </table>
+        <div class="empty-hint" id="filter-empty">暂无结果</div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- 详情抽屉 -->
+<div class="drawer-mask" id="drawer-mask" hidden>
+  <div class="drawer" id="drawer">
+    <div class="drawer-head">
+      <h2 id="drawer-title">图纸详情</h2>
+      <button class="icon-btn" id="drawer-close">✕</button>
+    </div>
+    <div class="drawer-body" id="drawer-body"></div>
+  </div>
+</div>
+
+<!-- 设置弹窗 -->
+<div class="modal-mask" id="settings-mask" hidden>
+  <div class="modal">
+    <div class="drawer-head">
+      <h2>设置</h2>
+      <button class="icon-btn" id="settings-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <label class="field">DeepSeek API 密钥
+        <input type="password" id="in-apikey" placeholder="sk-…（保存在本机 data/config.json，不会上传）">
+      </label>
+      <label class="field">模型
+        <input type="text" id="in-model" value="deepseek-flash">
+      </label>
+      <div class="btn-row">
+        <button class="btn primary" id="btn-save-config">保存</button>
+        <button class="btn ghost" id="btn-test-key">测试连接</button>
+        <span id="config-msg"></span>
+      </div>
+      <p class="hint">图纸数据、提取结果都保存在本程序 data 文件夹内；只有发给 AI 识别的图纸图片会经过 DeepSeek 接口。</p>
+    </div>
+  </div>
+</div>
+
+<script src="/vendor/pdf.min.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

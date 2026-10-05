@@ -1,0 +1,21 @@
+# 用户数据：含 API 密钥(config.json)、数据库、图纸原件，绝不入库
+data/
+
+# 便携 Python 运行时（11MB 二进制，安装包产物，不入库）
+# 部署时通过 README 的下载说明单独获取，或直接拷贝文件夹分发
+runtime/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 编辑器与系统文件
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+Desktop.ini
+
+# 测试临时文件
+public/_test.pdf
