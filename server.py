@@ -145,9 +145,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/pdf":
             did = int(self._qs("id") or 0)
             d = db.get_drawing(did)
-            if not d or not d.get("pdf_path") or not os.path.isfile(d["pdf_path"]):
+            pdf = db.resolve_pdf_path(d.get("pdf_path", "")) if d else ""
+            if not pdf or not os.path.isfile(pdf):
                 return self._err("原图文件不存在", 404)
-            with open(d["pdf_path"], "rb") as f:
+            with open(pdf, "rb") as f:
                 body = f.read()
             return self._send(200, body, "application/pdf")
         return self._err("未找到接口", 404)
@@ -189,9 +190,10 @@ class Handler(BaseHTTPRequestHandler):
             fp = os.path.join(db.PDF_DIR, fid + ".pdf")
             with open(fp, "wb") as f:
                 f.write(data)
-            # 上传即建档（提取前先占位，参数稍后补）
+            # 上传即建档（提取前先占位，参数稍后补）；库里存相对路径保证可迁移
             did = db.insert_drawing({
-                "file_name": name, "pdf_path": fp,
+                "file_name": name,
+                "pdf_path": os.path.join("data", "pdfs", fid + ".pdf"),
                 "pages": int(payload.get("pages") or 1),
                 "status": "draft",
             })

@@ -65,9 +65,33 @@ def connect():
     return conn
 
 
+def resolve_pdf_path(p):
+    """库里只存相对路径（data/pdfs/xxx.pdf），读取时解析成绝对路径。
+    兼容旧记录：若存的是其它电脑的绝对路径，退化为本机 data/pdfs 下的同名文件。"""
+    if not p:
+        return ""
+    if os.path.isabs(p):
+        local = os.path.join(PDF_DIR, os.path.basename(p))
+        return local if os.path.isfile(local) else p
+    return os.path.join(BASE_DIR, p)
+
+
+def _migrate_pdf_paths(conn):
+    """把历史绝对路径统一迁移为相对路径，保证整个文件夹拷到别的电脑后原图仍可打开。"""
+    rows = conn.execute("SELECT id, pdf_path FROM drawings WHERE pdf_path <> ''").fetchall()
+    for r in rows:
+        p = r["pdf_path"]
+        if os.path.isabs(p):
+            conn.execute(
+                "UPDATE drawings SET pdf_path=? WHERE id=?",
+                (os.path.join("data", "pdfs", os.path.basename(p)), r["id"]),
+            )
+
+
 def init_db():
     with connect() as conn:
         conn.executescript(SCHEMA)
+        _migrate_pdf_paths(conn)
 
 
 def now():
@@ -180,9 +204,10 @@ def delete_drawing(did):
         r = conn.execute("SELECT pdf_path FROM drawings WHERE id=?", (did,)).fetchone()
         conn.execute("DELETE FROM issues WHERE drawing_id=?", (did,))
         conn.execute("DELETE FROM drawings WHERE id=?", (did,))
-    if r and r["pdf_path"] and os.path.isfile(r["pdf_path"]):
+    pdf = resolve_pdf_path(r["pdf_path"]) if r and r["pdf_path"] else ""
+    if pdf and os.path.isfile(pdf):
         try:
-            os.remove(r["pdf_path"])
+            os.remove(pdf)
         except OSError:
             pass
 
