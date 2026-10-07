@@ -31,6 +31,76 @@ MIME = {
 # 每次 AI 调用允许的最大图片数（DeepSeek 单请求限制内，同时控制成本）
 MAX_PAGES = 12
 
+# 数据规范：状态/类别的合法取值（与 PRD §4 台账状态一致）
+VALID_STATUS = ("draft", "confirmed", "archived")
+VALID_CATEGORY = ("", "零件图", "装配图")
+VALID_ISSUE_STATUS = ("open", "accepted", "ignored")
+# 标题栏字段：列与 params_json 双向保持一致（单一数据源）
+TITLE_KEYS = ("drawing_no", "title", "material", "scale", "qty",
+              "category", "version", "draw_date")
+DATE_RE = re.compile(r"^\d{4}(-\d{1,2}(-\d{1,2})?)?$")
+
+
+def _validate_drawing(fields, current):
+    """保存前校验，返回带字段名的错误描述；通过则返回 None。current 为库中现有行（新增时为 None）。"""
+    if "params" in fields and not isinstance(fields["params"], dict):
+        return "参数 params 必须是 JSON 对象"
+    if "pages" in fields:
+        try:
+            int(fields["pages"])
+        except (TypeError, ValueError):
+            return "字段 pages（页数）必须是整数"
+    status = fields.get("status")
+    if status is None:
+        status = (current or {}).get("status", "confirmed")
+    if status not in VALID_STATUS:
+        return f"字段 status 取值非法（应为 {'/'.join(VALID_STATUS)}）"
+    if "category" in fields:
+        cat = str(fields.get("category") or "").strip()
+        if cat not in VALID_CATEGORY:
+            return "字段 category 只能是：零件图 或 装配图"
+    dd = fields.get("draw_date")
+    if dd is None:
+        dd = (current or {}).get("draw_date", "")
+    if dd and not DATE_RE.fullmatch(str(dd).strip()):
+        return "字段 draw_date 日期格式应为 YYYY-MM-DD"
+    no = fields.get("drawing_no")
+    if no is None:
+        no = (current or {}).get("drawing_no", "")
+    if status == "confirmed" and not str(no or "").strip():
+        return "字段 drawing_no：入库（confirmed）状态必须填写图号"
+    return None
+
+
+def _normalize_params(params):
+    """AI 提取结果入库前的规范化：类别杂值归一、文本去首尾空白。"""
+    if not isinstance(params, dict):
+        return {}
+    if str(params.get("category") or "").strip() not in VALID_CATEGORY:
+        params["category"] = ""
+    for k in TITLE_KEYS:
+        if isinstance(params.get(k), str):
+            params[k] = params[k].strip()
+    return params
+
+
+def _unify_title_params(fields, current):
+    """标题栏字段与 params_json 对齐：任一侧修改都同步到另一侧。"""
+    params = fields.get("params")
+    if isinstance(params, dict):
+        for k in TITLE_KEYS:
+            if k in fields:
+                params[k] = fields[k]
+            elif k not in fields and k in params:
+                fields[k] = params[k]
+        fields["params"] = params
+    elif any(k in fields for k in TITLE_KEYS):
+        base = dict((current or {}).get("params") or {})
+        for k in TITLE_KEYS:
+            if k in fields:
+                base[k] = fields[k]
+        fields["params"] = base
+
 
 def _json_body(handler):
     length = int(handler.headers.get("Content-Length") or 0)
@@ -142,6 +212,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._ok(d)
         if path == "/api/issues/stats":
             return self._ok(db.issue_stats())
+        if path == "/api/export":
+            # 全量导出：每条含完整 params 与 issues，供下游系统/备份使用
+            items = []
+            for d in db.list_drawings():
+                d["issues"] = db.list_issues(d["id"])
+                items.append(d)
+            return self._ok({"exported_at": db.now(), "count": len(items),
+                             "items": items})
+        if path == "/api/query/history":
+            return self._ok(db.query_history(self._qs("limit") or 50))
         if path == "/api/pdf":
             did = int(self._qs("id") or 0)
             d = db.get_drawing(did)
@@ -201,7 +281,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/extract":
             images = _images_from_payload(payload, self)
-            params = ai.extract_params(images)
+            params = _normalize_params(ai.extract_params(images))
             did = payload.get("drawing_id")
             if did:
                 db.update_drawing(int(did), {
@@ -220,7 +300,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/audit":
             images = _images_from_payload(payload, self)
-            issues = ai.audit_drawing(images)
+            rules = payload.get("rules")
+            if rules is not None:
+                if not isinstance(rules, list) or not rules:
+                    return self._err("请至少勾选一个检查项")
+                rules = [str(r) for r in rules][:20]
+            issues = ai.audit_drawing(images, rules)
             did = int(payload.get("drawing_id") or 0)
             if did:
                 db.replace_issues(did, issues)
@@ -229,6 +314,16 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/drawings/save":
             did = int(payload.get("id") or 0)
             fields = {k: v for k, v in payload.items() if k != "id"}
+            for k in TITLE_KEYS + ("file_name",):
+                if isinstance(fields.get(k), str):
+                    fields[k] = fields[k].strip()
+            current = db.get_drawing(did) if did else None
+            if did and not current:
+                return self._err("图纸不存在", 404)
+            err = _validate_drawing(fields, current)
+            if err:
+                return self._err(err, 400)
+            _unify_title_params(fields, current)
             if did:
                 db.update_drawing(did, fields)
             else:
@@ -240,7 +335,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._ok()
 
         if path == "/api/issues/update":
-            db.update_issue(int(payload.get("id") or 0), payload.get("status", "open"))
+            st = payload.get("status", "open")
+            if st not in VALID_ISSUE_STATUS:
+                return self._err(f"字段 status 取值非法（应为 {'/'.join(VALID_ISSUE_STATUS)}）")
+            db.update_issue(int(payload.get("id") or 0), st)
             return self._ok()
 
         if path == "/api/query":

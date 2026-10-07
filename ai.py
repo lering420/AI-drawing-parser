@@ -186,10 +186,28 @@ def extract_params(image_data_urls):
     return data
 
 
-def audit_drawing(image_data_urls):
+# 与 AUDIT_PROMPT 的检查类别、前端勾选框 value 一一对应
+AUDIT_CATEGORIES = (
+    "尺寸标注", "公差配合", "表面粗糙度", "形位公差", "材料与热处理",
+    "技术要求", "标题栏完整性", "图面一致性", "投影与剖视", "明细表",
+)
+
+
+def audit_drawing(image_data_urls, rules=None):
+    """rules 为勾选的检查类别列表；None 表示全查。仅在指定类别内找问题。"""
+    prompt = AUDIT_PROMPT
+    if rules is not None:
+        allowed = [r for r in rules if r in AUDIT_CATEGORIES]
+        if not allowed:
+            raise AIError("没有有效的检查项，请重新勾选。")
+        prompt += (
+            "\n本次仅检查以下类别，其它类别一律不要输出问题：\n"
+            + "、".join(allowed)
+            + "。"
+        )
     reply = _post({
         "model": db.load_config().get("model", "deepseek-flash"),
-        "messages": _vision_messages(AUDIT_PROMPT, image_data_urls),
+        "messages": _vision_messages(prompt, image_data_urls),
         "temperature": 0.1,
     })
     data = _extract_json(reply)

@@ -208,6 +208,7 @@
           <input type="search" id="manage-search" placeholder="搜图号 / 名称 / 材料…">
           <div class="btn-row">
             <button class="btn ghost" id="btn-export-all">⬇ 导出台账 CSV</button>
+            <button class="btn ghost" id="btn-export-json">⬇ 导出完整 JSON</button>
           </div>
         </div>
         <table class="list-table">
@@ -245,6 +246,11 @@
         </div>
         <div id="query-answer" class="answer" hidden></div>
         <div id="query-hits" class="hit-grid"></div>
+      </div>
+
+      <div class="card" id="history-card" hidden>
+        <h2>查询历史</h2>
+        <div id="history-list"></div>
       </div>
 
       <div class="card">
@@ -303,6 +309,8 @@
 </div>
 
 <script src="/vendor/pdf.min.js"></script>
+<script src="/lg-maps.js"></script>
+<script src="/liquid-glass.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

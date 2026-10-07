@@ -33,6 +33,6 @@
 ## 技术说明
 
 - 服务端：Python 标准库（零第三方依赖），`server.py` / `db.py` / `ai.py`
-- 前端：原生 HTML/JS + pdf.js（已本地化在 `public/vendor/`）
+- 前端：原生 HTML/JS + pdf.js（已本地化在 `public/vendor/`，© Mozilla，Apache License 2.0）+ 液态玻璃界面（移植自 [liquid-glass-vue](https://github.com/WXperia/liquid-glass-vue)，MIT）
 - PDF → 图片在浏览器本地完成，发给 DeepSeek 的只有渲染后的页面图片
 - AI 模型：`deepseek-flash`（视觉版，支持图片输入）

@@ -19,3 +19,9 @@ Desktop.ini
 
 # 测试临时文件
 public/_test.pdf
+
+# ZCode 会话/计划文件
+.zcode/
+
+# 误重定向产生的垃圾文件
+nul

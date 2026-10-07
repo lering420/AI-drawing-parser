@@ -35,7 +35,7 @@ $$(".nav-item[data-page]").forEach(btn => {
     $("#page-" + btn.dataset.page).classList.add("active");
     if (btn.dataset.page === "audit") refreshAuditSelect();
     if (btn.dataset.page === "manage") loadManage();
-    if (btn.dataset.page === "query") refreshQueryFilters();
+    if (btn.dataset.page === "query") { refreshQueryFilters(); loadQueryHistory(); }
   });
 });
 
@@ -216,9 +216,26 @@ const EXTRA_FIELDS = [
   ["unspecified_tolerance", "未注公差"],
 ];
 
+// 标题栏字段控件：类别用下拉（规范取值），日期用 date 控件（仅当已是完整格式）
+function titleControl(k, val, attr) {
+  const v = val == null ? "" : String(val);
+  if (k === "category") {
+    const opts = ["", "零件图", "装配图"];
+    if (v && !opts.includes(v)) opts.push(v);
+    return `<select data-${attr}="${k}">` + opts.map(o =>
+      `<option value="${esc(o)}"${o === v ? " selected" : ""}>${o === "" ? "（未识别）" : esc(o)}</option>`
+    ).join("") + "</select>";
+  }
+  if (k === "draw_date") {
+    const full = /^\d{4}-\d{2}-\d{2}$/.test(v);
+    return `<input type="${full ? "date" : "text"}" data-${attr}="${k}" value="${esc(v)}" placeholder="YYYY-MM-DD">`;
+  }
+  return `<input type="text" data-${attr}="${k}" value="${esc(v)}">`;
+}
+
 function renderEditor(p) {
   $("#title-fields").innerHTML = TITLE_FIELDS.map(([k, label]) =>
-    `<label>${label}<input type="text" data-tf="${k}" value="${esc(p[k])}"></label>`).join("");
+    `<label>${label}${titleControl(k, p[k], "tf")}</label>`).join("");
 
   $("#extra-fields").innerHTML = EXTRA_FIELDS.map(([k, label]) =>
     `<label>${label}<input type="text" data-xf="${k}" value="${esc(p[k])}"></label>`).join("");
@@ -345,6 +362,8 @@ $("#audit-select").addEventListener("change", async () => {
 
 $("#btn-audit").addEventListener("click", async () => {
   if (!$("#audit-select").value) { alert("请先选择一张图纸"); return; }
+  const rules = $$("#rules input:checked").map(i => i.value);
+  if (!rules.length) { alert("请至少勾选一个检查项"); return; }
   auditDrawingId = +$("#audit-select").value;
   $("#btn-audit").disabled = true;
   $("#audit-progress").hidden = false;
@@ -366,8 +385,8 @@ $("#btn-audit").addEventListener("click", async () => {
         auditImages.push(canvas.toDataURL("image/jpeg", 0.85));
       }
     }
-    // 2) AI 勘误
-    const r = await api("/api/audit", { images: auditImages, drawing_id: auditDrawingId });
+    // 2) AI 勘误（带上勾选的检查项）
+    const r = await api("/api/audit", { images: auditImages, drawing_id: auditDrawingId, rules });
     $("#audit-empty").hidden = true;
     renderIssues(r.issues, false);
   } catch (e) {
@@ -496,24 +515,58 @@ $("#drawing-rows").addEventListener("click", async e => {
   } catch (err) { toastErr(err); }
 });
 
-/* ---- 详情抽屉 ---- */
+/* ---- 详情抽屉：标题栏 + 深度参数均可编辑 ---- */
+let drawerState = null;   // {id, params} 抽屉内编辑用的深拷贝
+
+const DRAWER_BLANK = {
+  dimensions: { name: "", value: "", tolerance: "" },
+  fits: { name: "", value: "", tolerance: "" },
+  geometric_tolerances: { feature: "", symbol: "", value: "", datum: "" },
+  bom: { no: "", name: "", material: "", qty: "" },
+};
+
+function renderDrawerParams() {
+  if (!drawerState) return;
+  const p = drawerState.params;
+  const tbl = (kind, heads) => {
+    const rows = p[kind] || [];
+    return rows.length
+      ? `<table class="edit-table"><thead><tr>${heads.map(h => `<th>${h[1]}</th>`).join("")}<th></th></tr></thead><tbody>` +
+        rows.map((r, i) => "<tr>" + heads.map(h =>
+          `<td><input value="${esc(r[h[0]])}" data-dkind="${kind}" data-drow="${i}" data-dkey="${h[0]}"></td>`).join("") +
+          `<td><button class="mini-btn d-del" data-dkind="${kind}" data-ddel="${i}">✕</button></td></tr>`).join("") +
+        "</tbody></table>"
+      : '<p class="hint">无</p>';
+  };
+  const chips = p.roughness || [];
+  const techs = p.technical_requirements || [];
+  $("#d-params").innerHTML = `
+    <h3>尺寸与公差 <button class="mini-btn" data-dadd="dimensions">+ 添加</button></h3>
+    ${tbl("dimensions", [["name", "特征"], ["value", "尺寸值"], ["tolerance", "公差/偏差"]])}
+    <h3>配合 <button class="mini-btn" data-dadd="fits">+ 添加</button></h3>
+    ${tbl("fits", [["name", "特征"], ["value", "配合代号"], ["tolerance", "公差"]])}
+    <h3>形位公差 <button class="mini-btn" data-dadd="geometric_tolerances">+ 添加</button></h3>
+    ${tbl("geometric_tolerances", [["feature", "被测要素"], ["symbol", "符号"], ["value", "公差值"], ["datum", "基准"]])}
+    <h3>表面粗糙度 <button class="mini-btn" data-dadd="roughness">+ 添加</button></h3>
+    <div class="chips">${chips.length ? chips.map((t, i) =>
+      `<span class="chip">${esc(t)}<button data-dchip="${i}">✕</button></span>`).join("") : '<span class="hint">无</span>'}</div>
+    <div class="form-grid d-extra">
+      ${[["heat_treatment", "热处理"], ["hardness", "硬度"], ["unspecified_tolerance", "未注公差"]]
+        .map(([k, l]) => `<label>${l}<input data-dtf="${k}" value="${esc(p[k] || "")}"></label>`).join("")}
+    </div>
+    <h3>技术要求 <button class="mini-btn" data-dadd="technical_requirements">+ 添加</button></h3>
+    <div class="list-edit">${techs.length ? techs.map((t, i) =>
+      `<div class="li"><input value="${esc(t)}" data-dli="${i}"><button class="mini-btn d-del" data-dlidel="${i}">✕</button></div>`).join("") : '<span class="hint">无</span>'}</div>
+    <h3>零件明细表（BOM） <button class="mini-btn" data-dadd="bom">+ 添加</button></h3>
+    ${tbl("bom", [["no", "序号"], ["name", "名称"], ["material", "材料"], ["qty", "数量"]])}
+    <h3>备注</h3>
+    <textarea data-dnotes rows="2">${esc(p.notes || "")}</textarea>`;
+}
+
 async function openDrawer(id) {
   const d = await api("/api/drawings/" + id);
   $("#drawer-title").textContent = (d.drawing_no || "") + " " + (d.title || d.file_name);
-  const p = d.params || {};
-
-  const kvRows = [
-    ["图号", d.drawing_no], ["名称", d.title], ["材料", d.material],
-    ["比例", d.scale], ["数量", d.qty], ["类别", d.category],
-    ["版本", d.version], ["日期", d.draw_date], ["页数", d.pages],
-    ["状态", {confirmed: "在库", draft: "草稿", archived: "归档"}[d.status]],
-    ["原文件", d.file_name],
-  ].map(([k, v]) => `<span class="k">${k}</span><span>${esc(v) || "—"}</span>`).join("");
-
-  const tbl = (rows, cols) => rows && rows.length
-    ? `<table class="mini-table"><tr>${cols.map(c => `<th>${c[1]}</th>`).join("")}</tr>` +
-      rows.map(r => `<tr>${cols.map(c => `<td>${esc(r[c[0]]) || "—"}</td>`).join("")}</tr>`).join("") + "</table>"
-    : '<p class="hint">无</p>';
+  drawerState = { id: d.id, params: JSON.parse(JSON.stringify(d.params || {})) };
 
   const issuesHtml = d.issues.length
     ? d.issues.map(i => `<div class="issue-card ${i.severity} ${i.status !== "open" ? "resolved" : ""}">
@@ -527,50 +580,87 @@ async function openDrawer(id) {
       <div class="edit-inline" id="edit-meta">
         ${[["drawing_no", "图号"], ["title", "名称"], ["material", "材料"], ["scale", "比例"],
            ["qty", "数量"], ["category", "类别"], ["version", "版本"], ["draw_date", "日期"]]
-          .map(([k, label]) => `<label class="field">${label}<input data-mk="${k}" value="${esc(d[k])}"></label>`).join("")}
+          .map(([k, label]) => `<label class="field">${label}${titleControl(k, d[k], "mk")}</label>`).join("")}
       </div>
-      <div class="btn-row"><button class="btn primary" id="btn-meta-save">保存修改</button></div>
     </div>
-    <div class="detail-sec"><h3>特征参数</h3>
-      ${tbl(p.dimensions, [["name", "特征"], ["value", "尺寸值"], ["tolerance", "公差"]])}
-      <h3 style="margin-top:12px">配合</h3>
-      ${tbl(p.fits, [["name", "特征"], ["value", "配合代号"], ["tolerance", "公差"]])}
-      <h3 style="margin-top:12px">形位公差</h3>
-      ${tbl(p.geometric_tolerances, [["feature", "被测要素"], ["symbol", "符号"], ["value", "公差值"], ["datum", "基准"]])}
-      <p class="hint">粗糙度：${esc((p.roughness || []).join("、")) || "—"}<br>
-      热处理：${esc(p.heat_treatment) || "—"}　硬度：${esc(p.hardness) || "—"}<br>
-      技术要求：${esc((p.technical_requirements || []).join("；")) || "—"}</p>
-    </div>
-    ${(p.bom || []).length ? `<div class="detail-sec"><h3>零件明细表（BOM）</h3>
-      ${tbl(p.bom, [["no", "序号"], ["name", "名称"], ["material", "材料"], ["qty", "数量"]])}</div>` : ""}
+    <div class="detail-sec"><h3>特征参数（可修改后保存）</h3><div id="d-params"></div></div>
     <div class="detail-sec"><h3>勘误记录（${d.issues.length} 项）</h3>${issuesHtml}</div>
     <div class="detail-sec"><h3>原图 PDF</h3>
       <div class="btn-row" style="margin-top:0">
         <a class="btn ghost" href="/api/pdf?id=${d.id}" target="_blank">📂 打开原图</a>
         <button class="btn ghost" id="btn-export-one">⬇ 导出本图 JSON</button>
       </div>
-    </div>`;
+    </div>
+    <div class="btn-row"><button class="btn primary" id="btn-drawer-save">💾 保存全部修改</button></div>`;
 
-  $("#btn-meta-save").addEventListener("click", async () => {
-    const fields = {};
-    $$("#edit-meta input").forEach(i => fields[i.dataset.mk] = i.value);
+  if (window.LiquidGlass) LiquidGlass.rescan();
+  renderDrawerParams();
+
+  $("#btn-drawer-save").addEventListener("click", async () => {
+    const fields = { id: d.id };
+    $$("#edit-meta [data-mk]").forEach(i => fields[i.dataset.mk] = i.value);
+    fields.params = drawerState.params;
     try {
-      await api("/api/drawings/save", { id: d.id, ...fields });
+      await api("/api/drawings/save", fields);
       alert("已保存");
       loadManage();
+      openDrawer(d.id);
     } catch (err) { toastErr(err); }
   });
   $("#btn-export-one").addEventListener("click", () =>
-    downloadFile((d.drawing_no || "drawing") + ".json", JSON.stringify(d, null, 2), "application/json"));
+    downloadFile((d.drawing_no || "drawing") + ".json", JSON.stringify(d, null, 2), "application/json", false));
 
   $("#drawer-mask").hidden = false;
 }
+
+// 抽屉内编辑的事件委托（只绑定一次）
+$("#drawer-body").addEventListener("input", e => {
+  if (!drawerState) return;
+  const t = e.target, p = drawerState.params;
+  if (t.dataset.dtf) { p[t.dataset.dtf] = t.value; return; }
+  if (t.dataset.dnotes !== undefined) { p.notes = t.value; return; }
+  if (t.dataset.dli !== undefined) {
+    (p.technical_requirements = p.technical_requirements || [])[+t.dataset.dli] = t.value;
+    return;
+  }
+  if (t.dataset.dkey !== undefined && t.dataset.dkind) {
+    const arr = p[t.dataset.dkind] || (p[t.dataset.dkind] = []);
+    const row = arr[+t.dataset.drow];
+    if (row) row[t.dataset.dkey] = t.value;
+  }
+});
+$("#drawer-body").addEventListener("click", e => {
+  if (!drawerState) return;
+  const t = e.target, p = drawerState.params;
+  if (t.dataset.dadd) {
+    const kind = t.dataset.dadd;
+    if (kind === "roughness") (p.roughness = p.roughness || []).push("Ra3.2");
+    else if (kind === "technical_requirements") (p.technical_requirements = p.technical_requirements || []).push("新要求");
+    else (p[kind] = p[kind] || []).push({ ...(DRAWER_BLANK[kind] || {}) });
+    renderDrawerParams();
+    return;
+  }
+  if (t.dataset.ddel !== undefined && t.dataset.dkind) {
+    (p[t.dataset.dkind] || []).splice(+t.dataset.ddel, 1);
+    renderDrawerParams();
+    return;
+  }
+  if (t.dataset.dlidel !== undefined) {
+    (p.technical_requirements || []).splice(+t.dataset.dlidel, 1);
+    renderDrawerParams();
+    return;
+  }
+  if (t.dataset.dchip !== undefined && t.tagName === "BUTTON") {
+    (p.roughness || []).splice(+t.dataset.dchip, 1);
+    renderDrawerParams();
+  }
+});
 $("#drawer-close").addEventListener("click", () => { $("#drawer-mask").hidden = true; });
 $("#drawer-mask").addEventListener("click", e => { if (e.target.id === "drawer-mask") $("#drawer-mask").hidden = true; });
 
 /* ---- 导出 ---- */
-function downloadFile(name, content, type) {
-  const blob = new Blob(["\ufeff" + content], { type: type || "text/plain;charset=utf-8" });
+function downloadFile(name, content, type, bom = true) {
+  const blob = new Blob([(bom ? "\ufeff" : "") + content], { type: type || "text/plain;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = name;
@@ -583,12 +673,24 @@ function toCsv(rows, cols) {
     .concat(rows.map(r => cols.map(c => q(r[c[0]])).join(","))).join("\r\n");
 }
 $("#btn-export-all").addEventListener("click", async () => {
-  const list = await api(`/api/drawings?status=${manageStatus}`);
-  downloadFile("图纸台账.csv", toCsv(list, [
+  // 与页面一致：带当前页签和搜索关键词，末尾附参数 JSON 保证无损
+  const kw = $("#manage-search").value.trim();
+  const list = await api(`/api/drawings?status=${manageStatus}&keyword=${encodeURIComponent(kw)}`);
+  const rows = list.map(d => ({ ...d, params_json: JSON.stringify(d.params || {}) }));
+  downloadFile("图纸台账.csv", toCsv(rows, [
     ["drawing_no", "图号"], ["title", "名称"], ["material", "材料"], ["category", "类别"],
     ["scale", "比例"], ["qty", "数量"], ["version", "版本"], ["draw_date", "日期"],
-    ["status", "状态"], ["updated_at", "更新时间"],
+    ["status", "状态"], ["updated_at", "更新时间"], ["params_json", "参数JSON"],
   ]), "text/csv;charset=utf-8");
+});
+$("#btn-export-json").addEventListener("click", async () => {
+  try {
+    const data = await api("/api/export");
+    const n = x => String(x).padStart(2, "0");
+    const d = new Date();
+    downloadFile(`drawings_export_${d.getFullYear()}${n(d.getMonth() + 1)}${n(d.getDate())}.json`,
+      JSON.stringify(data, null, 2), "application/json", false);
+  } catch (e) { toastErr(e); }
 });
 
 /* ================= 模块4：智能查询 ================= */
@@ -632,6 +734,26 @@ $("#query-hits").addEventListener("click", e => {
   if (!card) return;
   $$(".nav-item").find(b => b.dataset.page === "manage").click();
   setTimeout(() => openDrawer(+card.dataset.id), 100);
+});
+
+/* ---- 查询历史（留痕可见） ---- */
+async function loadQueryHistory() {
+  try {
+    const list = await api("/api/query/history");
+    $("#history-card").hidden = !list.length;
+    $("#history-list").innerHTML = list.map(h => `
+      <div class="hist-item">
+        <div class="hist-head"><b>${esc(h.question)}</b><span class="hist-time">${esc(h.created_at)}</span></div>
+        <div class="hist-answer">${esc(h.answer)}</div>
+        ${(h.hits || []).length ? `<div class="hist-hits">${h.hits.map(x =>
+          `<button class="hist-hit" data-hid="${x.id}">${esc(x.drawing_no) || "（无图号）"}${x.title ? " · " + esc(x.title) : ""}</button>`
+        ).join("")}</div>` : ""}
+      </div>`).join("") || '<p class="hint">暂无历史</p>';
+  } catch (e) { /* 忽略 */ }
+}
+$("#history-list").addEventListener("click", e => {
+  const b = e.target.closest(".hist-hit");
+  if (b) openDrawer(+b.dataset.hid);
 });
 
 /* ---- 条件筛选 ---- */

@@ -55,6 +55,10 @@ CREATE TABLE IF NOT EXISTS query_log (
     hits_json  TEXT DEFAULT '[]',
     created_at TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_drawings_status ON drawings(status);
+CREATE INDEX IF NOT EXISTS idx_drawings_updated ON drawings(updated_at);
+CREATE INDEX IF NOT EXISTS idx_drawings_no ON drawings(drawing_no);
+CREATE INDEX IF NOT EXISTS idx_issues_drawing ON issues(drawing_id, status);
 """
 
 
@@ -162,9 +166,13 @@ def list_drawings(status=None, keyword=""):
         conds.append("status = ?")
         args.append(status)
     if keyword:
-        conds.append("(drawing_no LIKE ? OR title LIKE ? OR material LIKE ? OR file_name LIKE ?)")
+        # 除标题栏字段外，参数 JSON（尺寸/技术要求/BOM…）也可搜到
+        conds.append(
+            "(drawing_no LIKE ? OR title LIKE ? OR material LIKE ? OR file_name LIKE ?"
+            " OR params_json LIKE ?)"
+        )
         like = "%" + keyword + "%"
-        args.extend([like, like, like, like])
+        args.extend([like, like, like, like, like])
     if conds:
         q += " WHERE " + " AND ".join(conds)
     q += " ORDER BY updated_at DESC"
@@ -215,20 +223,60 @@ def delete_drawing(did):
 # ---------- 勘误 ----------
 
 def replace_issues(drawing_id, issues):
+    """用新一轮勘误结果更新某图纸的问题列表。
+    按 (category, location, problem) 与旧记录匹配：命中的沿用原 id 与已采纳/忽略处置，
+    只把结果里新增的问题插入为 open；被清除的仅是"新结果里没有且仍未处理"的旧问题，
+    已处置但本轮未再命中的保留为历史。"""
+
+    def _key(category, location, problem):
+        return (category or "", location or "", problem or "")
+
     ts = now()
     with connect() as conn:
-        conn.execute("DELETE FROM issues WHERE drawing_id=?", (drawing_id,))
+        old_rows = conn.execute(
+            "SELECT id, severity, category, page, location, problem, suggestion, basis, status"
+            " FROM issues WHERE drawing_id=?",
+            (drawing_id,),
+        ).fetchall()
+        pending = {}
         for it in issues:
+            pending.setdefault(
+                _key(it.get("category"), it.get("location"), it.get("problem")), []
+            ).append(it)
+        matched_ids = set()
+        for r in old_rows:
+            lst = pending.get(_key(r["category"], r["location"], r["problem"]))
+            if not lst:
+                continue
+            it = lst.pop(0)
+            matched_ids.add(r["id"])
             conn.execute(
-                """INSERT INTO issues
-                   (drawing_id, severity, category, page, location, problem,
-                    suggestion, basis, status, created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                (drawing_id, it.get("severity", "general"), it.get("category", ""),
-                 int(it.get("page", 1) or 1), it.get("location", ""),
-                 it.get("problem", ""), it.get("suggestion", ""),
-                 it.get("basis", ""), "open", ts),
+                """UPDATE issues SET severity=?, page=?, suggestion=?, basis=?,
+                                     status=CASE WHEN status IN ('accepted','ignored')
+                                                 THEN status ELSE 'open' END
+                   WHERE id=?""",
+                (it.get("severity", "general"), int(it.get("page", 1) or 1),
+                 it.get("suggestion", ""), it.get("basis", ""), r["id"]),
             )
+        stale = [r["id"] for r in old_rows
+                 if r["id"] not in matched_ids and r["status"] == "open"]
+        if stale:
+            conn.execute(
+                "DELETE FROM issues WHERE id IN (%s)" % ",".join("?" * len(stale)),
+                stale,
+            )
+        for lst in pending.values():
+            for it in lst:
+                conn.execute(
+                    """INSERT INTO issues
+                       (drawing_id, severity, category, page, location, problem,
+                        suggestion, basis, status, created_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (drawing_id, it.get("severity", "general"), it.get("category", ""),
+                     int(it.get("page", 1) or 1), it.get("location", ""),
+                     it.get("problem", ""), it.get("suggestion", ""),
+                     it.get("basis", ""), "open", ts),
+                )
 
 
 def list_issues(drawing_id):
@@ -265,6 +313,38 @@ def save_query(question, answer, hits):
             "INSERT INTO query_log (question, answer, hits_json, created_at) VALUES (?,?,?,?)",
             (question, answer, json.dumps(hits, ensure_ascii=False), now()),
         )
+
+
+def query_history(limit=50):
+    """读回查询留痕（最新在前），命中 id 解析成图纸简要信息供前端展示。"""
+    limit = max(1, min(int(limit or 50), 200))
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM query_log ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+    out, want = [], set()
+    for r in rows:
+        d = dict(r)
+        try:
+            hits = json.loads(d.pop("hits_json") or "[]")
+        except Exception:
+            hits = []
+        d["hits"] = [h for h in hits if isinstance(h, int)]
+        want.update(d["hits"])
+        out.append(d)
+    if want:
+        with connect() as conn:
+            ph = ",".join("?" * len(want))
+            got = conn.execute(
+                f"SELECT id, drawing_no, title, file_name FROM drawings WHERE id IN ({ph})",
+                tuple(want),
+            ).fetchall()
+        brief = {r["id"]: {"id": r["id"], "drawing_no": r["drawing_no"],
+                           "title": r["title"] or r["file_name"]} for r in got}
+        for d in out:
+            d["hits"] = [brief.get(i, {"id": i, "drawing_no": "", "title": "（已删除）"})
+                         for i in d["hits"]]
+    return out
 
 
 def catalog_digest(limit=200):

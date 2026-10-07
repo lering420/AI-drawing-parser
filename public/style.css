@@ -10,16 +10,29 @@
   --brand-d: #1d4ed8;
   --side: #101828;
   --side-ink: #aab4c5;
-  --severe: #dc2626;
-  --general: #d97706;
-  --hint: #2563eb;
-  --ok: #16a34a;
+  /* 语义色统一取深一档（red-700/amber-800/green-800/blue-700）：
+     浅底徽章（#fee2e2/#fef3c7/#dcfce7/#dbeafe）上 12-13px 文字需 ≥4.5:1 */
+  --severe: #b91c1c;
+  --general: #92400e;
+  --hint: #1d4ed8;
+  --ok: #166534;
   --radius: 10px;
 }
 html, body { height: 100%; }
 body {
   font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
-  background: var(--bg); color: var(--ink); font-size: 14px;
+  color: var(--ink); font-size: 14px;
+  /* 工程图纸壁纸：淡蓝网格（给玻璃折射提供可弯曲的高频内容）+ 柔和色团 */
+  background-color: #eef2fb;
+  background-image:
+    linear-gradient(rgba(37, 99, 235, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(37, 99, 235, 0.08) 1px, transparent 1px),
+    radial-gradient(1100px 750px at 12% -8%, rgba(147, 197, 253, 0.55) 0%, rgba(147, 197, 253, 0) 55%),
+    radial-gradient(950px 700px at 105% 8%, rgba(196, 181, 253, 0.50) 0%, rgba(196, 181, 253, 0) 52%),
+    radial-gradient(900px 850px at 55% 115%, rgba(94, 234, 212, 0.45) 0%, rgba(94, 234, 212, 0) 55%),
+    radial-gradient(750px 550px at 95% 75%, rgba(251, 191, 136, 0.40) 0%, rgba(251, 191, 136, 0) 50%);
+  background-size: 28px 28px, 28px 28px, auto, auto, auto, auto;
+  background-attachment: fixed;
 }
 #app { display: flex; min-height: 100vh; }
 
@@ -48,7 +61,7 @@ body {
 .sidebar-foot { padding: 8px; border-top: 1px solid rgba(255,255,255,.08); }
 .key-state { font-size: 11px; color: var(--side-ink); padding: 8px 12px 4px; }
 .key-state.ok { color: #4ade80; }
-.key-state.bad { color: #f87171; }
+.key-state.bad { color: #fca5a5; } /* 侧栏深底：red-300 才够 4.5:1 */
 
 /* ---------- 主区域 ---------- */
 .main { flex: 1; padding: 26px 30px 60px; max-width: 1400px; }
@@ -84,7 +97,8 @@ body {
   border-radius: 6px; padding: 2px 9px; cursor: pointer; color: var(--brand);
 }
 .mini-btn:hover { border-color: var(--brand); }
-.icon-btn { border: 0; background: transparent; font-size: 17px; cursor: pointer; color: var(--ink2); }
+/* 关闭钮用 --ink：弹窗/抽屉磨砂底实测 L≈0.73，--ink2 仅 4.44:1（需 4.5） */
+.icon-btn { border: 0; background: transparent; font-size: 17px; cursor: pointer; color: var(--ink); }
 input[type=text], input[type=search], input[type=password], select, textarea {
   border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px;
   font-size: 14px; font-family: inherit; background: #fff; color: var(--ink); width: 100%;
@@ -134,7 +148,7 @@ label.field input, label.field select { margin-top: 5px; }
 }
 .edit-table td { padding: 4px 6px; border-bottom: 1px solid #f1f4f9; }
 .edit-table input { padding: 6px 8px; font-size: 13px; }
-.edit-table .del { border: 0; background: transparent; color: #f87171; cursor: pointer; font-size: 15px; }
+.edit-table .del { border: 0; background: transparent; color: var(--severe); cursor: pointer; font-size: 15px; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip {
   display: inline-flex; align-items: center; gap: 6px; background: #eff6ff;
@@ -220,7 +234,7 @@ label.field input, label.field select { margin-top: 5px; }
   border: 0; background: transparent; font-size: 13px; cursor: pointer;
   color: var(--brand); padding: 2px 5px; font-family: inherit;
 }
-.row-actions .del { color: #f87171; }
+.row-actions .del { color: var(--severe); }
 
 /* ---------- 模块4 查询 ---------- */
 .query-card { background: linear-gradient(180deg, #f8fbff, #fff); }
@@ -282,3 +296,73 @@ label.field input, label.field select { margin-top: 5px; }
 .mini-table th { background: #f8fafc; font-weight: 600; }
 .pdf-frame { width: 100%; height: 480px; border: 1px solid var(--line); border-radius: 8px; }
 .edit-inline { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+/* ---- 抽屉深度参数编辑 ---- */
+#d-params { margin-top: 4px; }
+#d-params h3 {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 13px; color: var(--ink2); font-weight: 600;
+  border-bottom: 1px solid var(--line); padding-bottom: 6px;
+  margin: 16px 0 8px;
+}
+#d-params h3:first-child { margin-top: 0; }
+#d-params .edit-table .d-del,
+#d-params .list-edit .d-del {
+  /* 抽屉右缘折射带会把遮罩暗色拉进来（实测 L≈0.26-0.53），透明底会让
+     --severe 文字跌到 2.1:1；半透明白底托住对比度（合成后 ≥5.5:1） */
+  border: 0; background: rgba(255, 255, 255, 0.9); border-radius: 4px;
+  color: var(--severe); cursor: pointer; font-size: 14px; padding: 1px 5px;
+}
+#d-params textarea { min-height: 56px; resize: vertical; }
+#d-params .hint { margin-top: 2px; }
+
+/* ---- 查询历史 ---- */
+.hist-item { border-top: 1px dashed var(--line); padding: 10px 2px; }
+.hist-item:first-child { border-top: 0; padding-top: 2px; }
+.hist-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.hist-head b { font-size: 13.5px; color: var(--ink); }
+.hist-time { font-size: 12px; color: var(--ink2); flex-shrink: 0; }
+.hist-answer {
+  font-size: 13px; color: var(--ink2); line-height: 1.6; margin-top: 4px;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.hist-hits { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.hist-hit {
+  font-size: 12px; border: 1px solid var(--line); background: #fff;
+  border-radius: 999px; padding: 3px 10px; cursor: pointer; color: var(--brand);
+}
+.hist-hit:hover { border-color: var(--brand); }
+
+/* ---------- 液态玻璃（移植自 liquid-glass-vue, MIT） ---------- */
+/* .lg 由 liquid-glass.js 注入；.lg-warp 为磨砂折射层，内容层靠 z-index 保持清晰。
+   position 由 JS 仅在宿主为 static 时设置，避免覆盖 sidebar 的 sticky。 */
+.lg { isolation: isolate; overflow: hidden; }
+.lg-warp {
+  position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  /* backdrop-filter / filter:url() 由 JS 内联注入 */
+}
+/* feImage 的百分比按 SVG 视口解析 → SVG 必须铺满宿主（与原库 glassSize 对齐等效） */
+.lg-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+.lg > *:not(.lg-warp):not(.lg-svg) { position: relative; z-index: 1; }
+/* host 自身可聚焦（按钮）时，焦点环避开 overflow 裁切 */
+.lg:focus-visible { outline-offset: -3px; }
+
+/* 玻璃表面 */
+.sidebar {
+  /* 0.82：在透出壁纸磨砂的同时，保证 --side-ink 文字对比度 ≥ 4.5:1（0.66 时仅约 4.2） */
+  background: rgba(16, 24, 40, 0.82);
+  border-right: 1px solid rgba(255, 255, 255, 0.10);
+}
+.card {
+  background: rgba(255, 255, 255, 0.52);
+  border-color: rgba(255, 255, 255, 0.75);
+  box-shadow: 0 10px 32px rgba(15, 23, 42, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+.query-card { background: linear-gradient(180deg, rgba(248, 251, 255, 0.55), rgba(255, 255, 255, 0.42)); }
+.drawer { background: rgba(255, 255, 255, 0.78); }
+.modal { background: rgba(255, 255, 255, 0.80); }
+/* 主按钮保持实底：0.85 半透明压在浅色卡片上，磨砂提亮后白字仅 ~3.8:1（需 4.5） */
+.btn.ghost, .btn.danger { background: rgba(255, 255, 255, 0.55); }
+.chip-btn { background: rgba(255, 255, 255, 0.5); }
+.nav-item.active { background: rgba(37, 99, 235, 0.85); }
+.hit-card { background: rgba(255, 255, 255, 0.66); }
